@@ -27,6 +27,28 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
         public const string DefaultCaptureDirName = "ProfilerCaptures";
 
         /// <summary>
+        /// このパッケージのバージョン。取得できない場合は "unknown"。
+        /// 出力に刻んでおくと、古い出力を読んだときに
+        /// どの版が作ったものか判別できる
+        /// </summary>
+        public static string PackageVersion
+        {
+            get
+            {
+                try
+                {
+                    var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                        typeof(ProfilerCaptureAnalyzer).Assembly);
+                    return info != null ? info.version : "unknown";
+                }
+                catch
+                {
+                    return "unknown";
+                }
+            }
+        }
+
+        /// <summary>
         /// _frames.csv に載せるカウンタ。存在しないものは自動でスキップされる
         /// </summary>
         static readonly string[] Counters =
@@ -59,9 +81,17 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
         const int MaxThreads = 128;
 
         /// <summary>
-        /// 内訳を書き出すフレームの上限
+        /// 内訳を書き出すスパイクの上限。
+        /// スパイクは取りこぼすと調査そのものが成立しないので、
+        /// これは通常到達しない安全弁として大きめに取る
         /// </summary>
-        const int MaxDetailFrames = 120;
+        const int MaxSpikeFrames = 1000;
+
+        /// <summary>
+        /// スパイクが無い/少ないときに参考として足す「重い順」のフレーム数。
+        /// スパイクの枠を食わないよう少数に留める
+        /// </summary>
+        const int MaxFillerFrames = 10;
 
         /// <summary>
         /// 1スレッドあたりに残すマーカー数（self time の大きい順）
@@ -159,9 +189,10 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
                 var frames = WriteFrameCsv(first, last, result.FramesCsvPath);
                 result.FrameCount = frames.Count;
 
-                var targets = SelectDetailFrames(frames, out var spikeFrames);
-                var attribution = WriteMarkerCsv(targets, result.MarkersCsvPath);
-                WriteReport(frames, targets, spikeFrames, attribution, result.ReportPath);
+                var targets = SelectDetailFrames(frames, out var spikeFrames, out int totalSpikeCount);
+                var attribution = WriteMarkerCsv(targets, result.MarkersCsvPath, out int markerRowCount);
+                WriteReport(frames, targets, spikeFrames, totalSpikeCount, attribution, markerRowCount,
+                    capturePath, result.ReportPath);
 
                 result.Success = true;
             }
@@ -274,31 +305,46 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
 
         /// <summary>
         /// 内訳を書き出すフレームを選ぶ。
-        /// スパイクを時系列順に拾うので、序盤で起きる現象を取りこぼさない。
         ///
-        /// 枠が余る場合は重い順で埋めるが、埋めた分は閾値未満なので
-        /// spikeFrames には含めない（レポートで区別して出すため）。
+        /// スパイクは原則すべて記録する。以前は上限120で「重い順の埋め草」と
+        /// 枠を共有していたため、スパイクが多いキャプチャでは後半のスパイクが
+        /// 丸ごと欠落していた（調査対象そのものが消える）。
+        ///
+        /// 埋め草はスパイクが無いときに「最も重かったフレーム」を見るためのもので、
+        /// 少数に限定してスパイクの枠を侵さないようにしている。
         /// </summary>
-        static List<int> SelectDetailFrames(List<FrameInfo> frames, out HashSet<int> spikeFrames)
+        /// <param name="spikeFrames">閾値を超えたフレーム（レポートで区別して出す）</param>
+        /// <param name="totalSpikeCount">閾値を超えたフレームの総数。切り捨てが起きたかの判定に使う</param>
+        static List<int> SelectDetailFrames(List<FrameInfo> frames,
+            out HashSet<int> spikeFrames, out int totalSpikeCount)
         {
             var targets = new List<int>();
             spikeFrames = new HashSet<int>();
+            totalSpikeCount = 0;
             if (frames.Count == 0) return targets;
 
             float threshold = SpikeThreshold(frames);
 
-            foreach (var f in frames.Where(f => f.CpuMs > threshold).OrderBy(f => f.Index))
+            // 時系列順に拾うので、切り捨てが起きても序盤の現象は残る
+            var spikes = frames.Where(f => f.CpuMs > threshold).OrderBy(f => f.Index).ToList();
+            totalSpikeCount = spikes.Count;
+
+            foreach (var f in spikes)
             {
-                if (targets.Count >= MaxDetailFrames) break;
+                if (targets.Count >= MaxSpikeFrames) break;
                 targets.Add(f.Index);
                 spikeFrames.Add(f.Index);
             }
 
-            // スパイクが少ない場合は重い順で埋める（あくまで参考値）
+            // 参考として重い順に少数だけ足す（閾値未満なので spikeFrames には入れない）
+            int filler = 0;
             foreach (var f in frames.OrderByDescending(f => f.CpuMs))
             {
-                if (targets.Count >= MaxDetailFrames) break;
-                if (!targets.Contains(f.Index)) targets.Add(f.Index);
+                if (filler >= MaxFillerFrames) break;
+                if (spikeFrames.Contains(f.Index)) continue;
+
+                targets.Add(f.Index);
+                filler++;
             }
 
             targets.Sort();
@@ -334,9 +380,11 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
             public float GcCollectMs;
         }
 
-        static Dictionary<int, Attribution> WriteMarkerCsv(List<int> targets, string csvPath)
+        static Dictionary<int, Attribution> WriteMarkerCsv(List<int> targets, string csvPath,
+            out int markerRowCount)
         {
             var attribution = new Dictionary<int, Attribution>();
+            markerRowCount = 0;
 
             var sb = new StringBuilder();
             sb.AppendLine("frame,threadIndex,threadGroup,threadName,marker,selfMs,totalMs,calls,gcBytes");
@@ -386,6 +434,7 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
                               .Append(a.Calls).Append(',')
                               .Append((long)a.GcBytes)
                               .AppendLine();
+                            markerRowCount++;
 
                             // GC の停止は全スレッドに波及するため、別枠で記録しておく
                             if (IsGarbageCollectMarker(a.Name) && a.SelfMs > best.GcCollectMs)
@@ -504,14 +553,120 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
             }
         }
 
-        static void WriteReport(List<FrameInfo> frames, List<int> targets, HashSet<int> spikeFrames,
-            Dictionary<int, Attribution> attribution, string reportPath)
+        /// <summary>
+        /// 出力が妥当かどうかを機械的に点検する。
+        ///
+        /// 解析ツール自身のバグは「結果がそれらしく見える」ため気づきにくい。
+        /// 実際、待機マーカーを除外していなかった頃は原因欄が Idle で埋まっていたが、
+        /// 表としては成立していたので一見して異常とは分からなかった。
+        /// 疑わしい兆候をここで明示しておく。
+        /// </summary>
+        static List<string> BuildSelfCheck(List<FrameInfo> frames, List<int> targets,
+            HashSet<int> spikeFrames, int totalSpikeCount,
+            Dictionary<int, Attribution> attribution, int markerRowCount)
         {
-            var sb = new StringBuilder();
+            var warnings = new List<string>();
 
             if (frames.Count == 0)
             {
-                File.WriteAllText(reportPath, "no frames\n", new UTF8Encoding(false));
+                warnings.Add("[ERROR] フレームが1つも読めていない。キャプチャが壊れている可能性がある。");
+                return warnings;
+            }
+
+            if (markerRowCount == 0)
+            {
+                warnings.Add("[ERROR] _markers.csv が空。マーカー走査の API が変わった可能性がある。");
+            }
+
+            if (!frames.Any(f => f.GpuMs > 0f))
+            {
+                warnings.Add("[WARN ] gpuMs が全フレーム 0。GPU 側の要因はこのキャプチャからは判定できない。");
+            }
+
+            // Profiler は直近 N フレームしか保持しないリングバッファなので、
+            // 長く回してから保存すると前半が上書きされて消えている。
+            // Play 開始直後はシーンロードと JIT で必ず突出して重くなるため、
+            // 先頭フレームが平凡なら「途中から始まっている」と判断できる。
+            var median = frames.Select(f => f.CpuMs).OrderBy(v => v).ElementAt(frames.Count / 2);
+            if (median > 0f && frames[0].CpuMs < median * 10f)
+            {
+                warnings.Add(
+                    $"[WARN ] 先頭フレームが {frames[0].CpuMs:F2} ms（中央値の " +
+                    $"{frames[0].CpuMs / median:F1} 倍）で、Play 開始直後の特徴が無い。" +
+                    "リングバッファが巻き戻り、これより前のフレームは失われている可能性が高い。" +
+                    "調べたい現象が録画範囲の外にある場合は、短く回して録り直すこと。");
+            }
+
+            if (spikeFrames.Count == 0)
+            {
+                warnings.Add("[INFO ] 閾値を超えるスパイクなし。フレーム時間は安定している。");
+            }
+
+            if (totalSpikeCount > spikeFrames.Count)
+            {
+                warnings.Add($"[ERROR] スパイク {totalSpikeCount} 件のうち {spikeFrames.Count} 件しか" +
+                             $"内訳を記録できていない（上限 {MaxSpikeFrames}）。" +
+                             "後半のスパイクは _markers.csv に無い。");
+            }
+
+            int missing = targets.Count(t => !attribution.ContainsKey(t));
+            if (missing > 0)
+            {
+                warnings.Add($"[WARN ] {missing}/{targets.Count} フレームで要因を特定できなかった。" +
+                             "除外条件が広すぎる可能性がある。");
+            }
+
+            // 原因欄が全フレームで同じマーカーになる場合、除外漏れを疑う
+            var attributed = attribution.Values.Where(a => !string.IsNullOrEmpty(a.Marker)).ToList();
+            if (attributed.Count >= 5)
+            {
+                var top = attributed.GroupBy(a => a.Marker).OrderByDescending(g => g.Count()).First();
+                if (top.Count() == attributed.Count)
+                {
+                    warnings.Add($"[WARN ] 全 {attributed.Count} フレームの要因が \"{top.Key}\" で同一。" +
+                                 "待機マーカーの除外漏れを疑うこと。");
+                }
+            }
+
+            int gcFrames = attribution.Values.Count(a => a.GcCollectMs > 0f);
+            if (gcFrames > 0)
+            {
+                warnings.Add($"[WARN ] {gcFrames} フレームで停止型 GC を検出。" +
+                             "スパイクの主因はほぼこれ。確保しているコードを探すこと。");
+            }
+
+            int editorFrames = attribution.Values.Count(a => a.Marker == "EditorLoop");
+            if (editorFrames > 0)
+            {
+                warnings.Add($"[WARN ] {editorFrames} フレームの要因が EditorLoop（エディタ自身の負荷）。" +
+                             "ビルド版の実態を知るには Development Build で取り直すこと。");
+            }
+
+            return warnings;
+        }
+
+        static void WriteReport(List<FrameInfo> frames, List<int> targets, HashSet<int> spikeFrames,
+            int totalSpikeCount, Dictionary<int, Attribution> attribution, int markerRowCount,
+            string capturePath, string reportPath)
+        {
+            var sb = new StringBuilder();
+
+            // 出力を後から読んだときに、どの版が何を対象に作ったものか分かるようにする
+            sb.AppendLine("=== ENVIRONMENT ===");
+            sb.AppendLine($"dumper version : {PackageVersion}");
+            sb.AppendLine($"unity version  : {Application.unityVersion}");
+            sb.AppendLine($"generated at   : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine($"capture        : {Path.GetFileName(capturePath)}");
+            sb.AppendLine($"settings       : maxSpikeFrames={MaxSpikeFrames}, " +
+                          $"maxFillerFrames={MaxFillerFrames}, markersPerThread={MarkersPerThread}, " +
+                          $"threadNoiseFloorMs={ThreadNoiseFloorMs}");
+            sb.AppendLine();
+
+            if (frames.Count == 0)
+            {
+                sb.AppendLine("=== SELF-CHECK ===");
+                sb.AppendLine("  [ERROR] フレームが1つも読めていない。キャプチャが壊れている可能性がある。");
+                File.WriteAllText(reportPath, sb.ToString(), new UTF8Encoding(false));
                 return;
             }
 
@@ -521,12 +676,33 @@ namespace StarOceanMemories.ProfilerCaptureDumper.Editor
             float max = sorted[sorted.Length - 1];
             bool gpuRecorded = frames.Any(f => f.GpuMs > 0f);
 
+            // フレーム数だけでは何秒ぶんか分からないため、実時間も出す
+            float wallClockSec = frames.Sum(f => f.CpuMs) / 1000f;
+
             sb.AppendLine("=== SUMMARY ===");
             sb.AppendLine($"frames     : {frames.Count} ({frames[0].Index}..{frames[frames.Count - 1].Index})");
+            sb.AppendLine($"duration   : {wallClockSec:F1} 秒（Profiler は直近Nフレームしか保持しない）");
+            sb.AppendLine($"first frame: {frames[0].CpuMs:F2} ms" +
+                          $"{(frames[0].CpuMs > median * 10f ? "（Play開始から記録されている）" : "（起動フレームに見えない。SELF-CHECK参照）")}");
             sb.AppendLine($"cpu median : {median:F2} ms ({(median > 0f ? 1000f / median : 0f):F1} fps)");
             sb.AppendLine($"cpu p95    : {p95:F2} ms");
             sb.AppendLine($"cpu max    : {max:F2} ms");
             sb.AppendLine($"gpu times  : {(gpuRecorded ? "recorded" : "NOT recorded (GPU側の要因はこのキャプチャからは判定できません)")}");
+            sb.AppendLine();
+
+            sb.AppendLine("=== SELF-CHECK ===");
+            sb.AppendLine("出力の妥当性を機械的に点検した結果。解析を読む前にここを確認すること。");
+            sb.AppendLine();
+            var checks = BuildSelfCheck(frames, targets, spikeFrames, totalSpikeCount,
+                attribution, markerRowCount);
+            if (checks.Count == 0)
+            {
+                sb.AppendLine("  指摘なし");
+            }
+            else
+            {
+                foreach (var c in checks) sb.AppendLine($"  {c}");
+            }
             sb.AppendLine();
 
             var byIndex = frames.ToDictionary(f => f.Index, f => f);
