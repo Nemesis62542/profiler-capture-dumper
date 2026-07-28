@@ -9,7 +9,7 @@ using UnityEditor.Profiling;
 using UnityEditorInternal; // ProfilerDriver
 using UnityEngine;
 
-namespace StarOceanMemories.ProfilerCaptureDumper.Editor
+namespace Nemesis62542.ProfilerCaptureDumper.Editor
 {
     /// <summary>
     /// Profiler の .data キャプチャを読み込み、解析結果をファイルに書き出す。

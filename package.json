@@ -1,6 +1,6 @@
 {
-  "name": "com.staroceanmemories.profiler-capture-dumper",
-  "version": "1.1.0",
+  "name": "com.nemesis62542.profiler-capture-dumper",
+  "version": "2.0.0",
   "displayName": "Profiler Capture Dumper",
   "description": "Unity Profiler の .data キャプチャを CSV とテキストレポートに書き出すエディタ拡張。Profiler ウィンドウの Capture Dumper モジュールから実行できます。出力は機械可読な CSV なので、そのまま解析ツールや LLM に読ませられます。",
   "unity": "2021.2",
@@ -11,6 +11,6 @@
     "editor"
   ],
   "author": {
-    "name": "StarOceanMemories"
+    "name": "Nemesis62542"
   }
 }

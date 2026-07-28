@@ -1,6 +1,6 @@
 {
-    "name": "StarOceanMemories.ProfilerCaptureDumper.Editor",
-    "rootNamespace": "StarOceanMemories.ProfilerCaptureDumper.Editor",
+    "name": "Nemesis62542.ProfilerCaptureDumper.Editor",
+    "rootNamespace": "Nemesis62542.ProfilerCaptureDumper.Editor",
     "references": [],
     "includePlatforms": [
         "Editor"

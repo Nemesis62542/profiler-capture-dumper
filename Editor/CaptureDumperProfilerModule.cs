@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace StarOceanMemories.ProfilerCaptureDumper.Editor
+namespace Nemesis62542.ProfilerCaptureDumper.Editor
 {
     /// <summary>
     /// Profiler ウィンドウに "Capture Dumper" モジュールを追加する。

@@ -38,7 +38,7 @@ https://github.com/Nemesis62542/profiler-capture-dumper.git#v1.0.0
 `Packages/manifest.json` の `dependencies` に追記:
 
 ```json
-"com.staroceanmemories.profiler-capture-dumper": "file:C:/Users/<user>/UnityPackages/com.staroceanmemories.profiler-capture-dumper"
+"com.nemesis62542.profiler-capture-dumper": "file:C:/Users/<user>/UnityPackages/com.nemesis62542.profiler-capture-dumper"
 ```
 
 Package Manager → **`+` → Install package from disk...** で `package.json` を
@@ -49,7 +49,7 @@ Package Manager → **`+` → Install package from disk...** で `package.json` 
 
 ### C. フォルダごとコピー（埋め込みパッケージ）
 
-`com.staroceanmemories.profiler-capture-dumper/` を対象プロジェクトの `Packages/` 直下に置く。
+`com.nemesis62542.profiler-capture-dumper/` を対象プロジェクトの `Packages/` 直下に置く。
 `manifest.json` の編集は不要（`Packages/` 直下は埋め込みパッケージとして自動認識される）。
 
 最も壊れにくい代わりに、更新は手動コピーになる。

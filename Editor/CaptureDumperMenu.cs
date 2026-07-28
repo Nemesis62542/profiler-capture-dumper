@@ -2,7 +2,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace StarOceanMemories.ProfilerCaptureDumper.Editor
+namespace Nemesis62542.ProfilerCaptureDumper.Editor
 {
     /// <summary>
     /// メニューからの実行と、ファイル経由での実行トリガー。

@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.0] - 2026-07-28
+
+### Changed (breaking)
+
+作者表記を組織名から個人名に変更した。パッケージの識別子が変わるため破壊的変更として扱う。
+
+| | 変更前 | 変更後 |
+|---|---|---|
+| パッケージ ID | `com.staroceanmemories.profiler-capture-dumper` | `com.nemesis62542.profiler-capture-dumper` |
+| author | StarOceanMemories | Nemesis62542 |
+| 名前空間 | `StarOceanMemories.ProfilerCaptureDumper.Editor` | `Nemesis62542.ProfilerCaptureDumper.Editor` |
+| asmdef | `StarOceanMemories.ProfilerCaptureDumper.Editor` | `Nemesis62542.ProfilerCaptureDumper.Editor` |
+| フォルダ名 | `com.staroceanmemories.profiler-capture-dumper` | `com.nemesis62542.profiler-capture-dumper` |
+
+**旧 ID で導入済みの場合は、いったん削除してから入れ直すこと。**
+Unity は別パッケージとして扱うため、そのままでは両方が入って型が衝突する。
+
 ## [1.1.0] - 2026-07-28
 
 ### Added
